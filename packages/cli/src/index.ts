@@ -20,6 +20,7 @@ import ClearCache from './cli/commands/cache/clear.js'
 import AutoupgradeOff from './cli/commands/config/autoupgrade/off.js'
 import AutoupgradeOn from './cli/commands/config/autoupgrade/on.js'
 import AutoupgradeStatus from './cli/commands/config/autoupgrade/status.js'
+import SkillInstall from './cli/commands/skill/install.js'
 import {createGlobalProxyAgent} from 'global-agent'
 import StoreCommands from '@shopify/store'
 import ThemeCommands from '@shopify/theme'
@@ -168,6 +169,7 @@ export const COMMANDS: any = {
   'config:autoupgrade:off': AutoupgradeOff,
   'config:autoupgrade:on': AutoupgradeOn,
   'config:autoupgrade:status': AutoupgradeStatus,
+  'skill:install': SkillInstall,
 }
 
 export default runShopifyCLI
