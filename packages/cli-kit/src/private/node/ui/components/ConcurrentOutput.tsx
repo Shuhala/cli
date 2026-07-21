@@ -1,7 +1,7 @@
 import {OutputProcess} from '../../../../public/node/output.js'
 import {AbortSignal} from '../../../../public/node/abort.js'
 import {useComplete} from '../../ui.js'
-import React, {FunctionComponent, useCallback, useEffect, useMemo, useState} from 'react'
+import React, {FunctionComponent, useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {Box, Static, Text, TextProps} from 'ink'
 import figures from 'figures'
 import stripAnsi from 'strip-ansi'
@@ -16,12 +16,17 @@ export interface ConcurrentOutputProps {
   showTimestamps?: boolean
   keepRunningAfterProcessesResolve?: boolean
   useAlternativeColorPalette?: boolean
+  /** Filters both existing and future output by its displayed prefix. */
+  outputFilter?: (prefix: string) => boolean
+  /** Called when output is received, including output with a contextual prefix. */
+  onOutputPrefix?: (prefix: string) => void
 }
 
 interface Chunk {
   color: TextProps['color']
   prefix: string
   lines: string[]
+  timestamp: string
 }
 
 function addLeadingZero(number: number) {
@@ -91,9 +96,13 @@ const ConcurrentOutput: FunctionComponent<ConcurrentOutputProps> = ({
   showTimestamps = true,
   keepRunningAfterProcessesResolve = false,
   useAlternativeColorPalette = false,
+  outputFilter,
+  onOutputPrefix,
 }) => {
   const [processOutput, setProcessOutput] = useState<Chunk[]>([])
   const [completionResult, setCompletionResult] = useState<{error?: Error} | null>(null)
+  const onOutputPrefixRef = useRef(onOutputPrefix)
+  onOutputPrefixRef.current = onOutputPrefix
   const complete = useComplete()
   const concurrentColors: TextProps['color'][] = useMemo(
     () =>
@@ -144,12 +153,14 @@ const ConcurrentOutput: FunctionComponent<ConcurrentOutputProps> = ({
           const index = addPrefix(prefix, prefixes)
 
           const lines = shouldStripAnsi ? stripAnsi(log).split(/\n/) : log.split(/\n/)
+          onOutputPrefixRef.current?.(prefix)
           setProcessOutput((previousProcessOutput) => [
             ...previousProcessOutput,
             {
               color: lineColor(index),
               prefix,
               lines,
+              timestamp: currentTime(),
             },
           ])
           next()
@@ -203,31 +214,32 @@ const ConcurrentOutput: FunctionComponent<ConcurrentOutputProps> = ({
 
   const {lineVertical} = figures
 
-  return (
-    <Static items={processOutput}>
-      {(chunk, index) => {
-        return (
-          <Box flexDirection="column" key={index}>
-            {chunk.lines.map((line, index) => (
-              <Box key={index} flexDirection="row">
-                <Text>
-                  {showTimestamps ? (
-                    <Text>
-                      {currentTime()} {lineVertical}{' '}
-                    </Text>
-                  ) : null}
-                  <Text color={chunk.color}>{formatPrefix(chunk.prefix)}</Text>
-                  <Text>
-                    {' '}
-                    {lineVertical} {line}
-                  </Text>
-                </Text>
-              </Box>
-            ))}
-          </Box>
-        )
-      }}
-    </Static>
+  const renderChunk = (chunk: Chunk, index: number) => (
+    <Box flexDirection="column" key={index}>
+      {chunk.lines.map((line, index) => (
+        <Box key={index} flexDirection="row">
+          <Text>
+            {showTimestamps ? (
+              <Text>
+                {chunk.timestamp} {lineVertical}{' '}
+              </Text>
+            ) : null}
+            <Text color={chunk.color}>{formatPrefix(chunk.prefix)}</Text>
+            <Text>
+              {' '}
+              {lineVertical} {line}
+            </Text>
+          </Text>
+        </Box>
+      ))}
+    </Box>
   )
+
+  if (outputFilter) {
+    // Ink's Static output is immutable once written, so filterable output must remain in the live render tree.
+    return <Box flexDirection="column">{processOutput.filter(({prefix}) => outputFilter(prefix)).map(renderChunk)}</Box>
+  }
+
+  return <Static items={processOutput}>{renderChunk}</Static>
 }
 export {ConcurrentOutput, ConcurrentOutputContext, useConcurrentOutputContext}

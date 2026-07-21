@@ -157,6 +157,16 @@ describe('TabPanel', () => {
     renderInstance.unmount()
   })
 
+  test('executes tab action when action tab is clicked', async () => {
+    const renderInstance = render(<TabPanel tabs={sampleTabs} initialActiveTab="a" />)
+
+    await waitForInputsToBeReady()
+    await sendInputAndWait(renderInstance, 10, ...mouseClick(100, 2))
+
+    expect(mockAction).toHaveBeenCalledOnce()
+    renderInstance.unmount()
+  })
+
   test('executes shortcut action when shortcut key is pressed', async () => {
     const renderInstance = render(<TabPanel tabs={sampleTabs} initialActiveTab="a" />)
 

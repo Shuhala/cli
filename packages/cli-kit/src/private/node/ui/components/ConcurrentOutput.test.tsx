@@ -4,7 +4,7 @@ import {AbortController, AbortSignal} from '../../../../public/node/abort.js'
 import {unstyled} from '../../../../public/node/output.js'
 
 import React from 'react'
-import {describe, expect, test} from 'vitest'
+import {describe, expect, test, vi} from 'vitest'
 
 import {Writable} from 'stream'
 
@@ -174,6 +174,58 @@ describe('ConcurrentOutput', () => {
     const logColumns = unstyled(renderInstance.lastFrame()!).split('│')
     expect(logColumns.length).toBe(3)
     expect(logColumns[1]?.trim()).toEqual(extensionName)
+    gate.resolve()
+  })
+
+  test('filters existing output by prefix without restarting processes', async () => {
+    const outputSync = new Synchronizer()
+    const gate = new Synchronizer()
+    const abortSignal = new AbortController().signal
+    const observedPrefixes: string[] = []
+    const backendAction = vi.fn(async (stdout: Writable) => {
+      stdout.write('backend message')
+      await gate.promise
+    })
+    const frontendAction = vi.fn(async (stdout: Writable) => {
+      useConcurrentOutputContext({outputPrefix: 'custom-frontend'}, () => {
+        stdout.write('frontend message')
+      })
+      outputSync.resolve()
+      await gate.promise
+    })
+    const processes = [
+      {prefix: 'backend', action: backendAction},
+      {prefix: 'frontend', action: frontendAction},
+    ]
+
+    const renderInstance = render(
+      <ConcurrentOutput
+        processes={processes}
+        abortSignal={abortSignal}
+        outputFilter={() => true}
+        onOutputPrefix={(prefix) => observedPrefixes.push(prefix)}
+      />,
+    )
+    await outputSync.promise
+    await waitForContent(renderInstance, 'frontend message')
+
+    renderInstance.rerender(
+      <ConcurrentOutput
+        processes={processes}
+        abortSignal={abortSignal}
+        outputFilter={(prefix) => prefix === 'backend'}
+        onOutputPrefix={(prefix) => observedPrefixes.push(prefix)}
+      />,
+    )
+    await waitForContent(renderInstance, 'backend message')
+
+    const output = unstyled(renderInstance.lastFrame()!)
+    expect(output).toContain('backend message')
+    expect(output).not.toContain('frontend message')
+    expect(observedPrefixes).toEqual(['backend', 'custom-frontend'])
+    expect(backendAction).toHaveBeenCalledOnce()
+    expect(frontendAction).toHaveBeenCalledOnce()
+
     gate.resolve()
   })
 

@@ -12,6 +12,7 @@ import React from 'react'
 import {beforeEach, describe, expect, test, vi} from 'vitest'
 import {unstyled} from '@shopify/cli-kit/node/output'
 import {openURL} from '@shopify/cli-kit/node/system'
+import {useConcurrentOutputContext} from '@shopify/cli-kit/node/ui/components'
 import {Writable} from 'stream'
 
 vi.mock('@shopify/cli-kit/node/system', async () => {
@@ -173,6 +174,95 @@ describe('DevSessionUI', () => {
     expect(output).toContain('GraphiQL URL: https://graphiql.shopify.com')
     expect(output).toContain('Dev Console URL: https://mystore.myshopify.com/admin?dev-console=show')
 
+    renderInstance.unmount()
+  })
+
+  test('cycles through log prefixes and only renders output for the selected prefix', async () => {
+    let processesStartedResolve: () => void
+    const processesStarted = new Promise<void>((resolve) => {
+      processesStartedResolve = resolve
+    })
+    let releaseProcesses = () => {}
+    const processesReleased = new Promise<void>((resolve) => {
+      releaseProcesses = resolve
+    })
+    let startedProcessCount = 0
+    const processStarted = () => {
+      startedProcessCount++
+      if (startedProcessCount === 3) processesStartedResolve()
+    }
+    const appPreviewProcess = {
+      prefix: 'app-preview',
+      action: async (stdout: Writable) => {
+        stdout.write('app preview message')
+        useConcurrentOutputContext({outputPrefix: 'app_home'}, () => {
+          stdout.write('app home message')
+        })
+        processStarted()
+        await processesReleased
+      },
+    }
+    const webProcess = {
+      prefix: 'React Router',
+      action: async (stdout: Writable) => {
+        stdout.write('react router message')
+        processStarted()
+        await processesReleased
+      },
+    }
+    const graphiqlProcess = {
+      prefix: 'graphiql',
+      action: async (stdout: Writable) => {
+        stdout.write('graphiql message')
+        processStarted()
+        await processesReleased
+      },
+    }
+
+    const renderInstance = render(
+      <DevSessionUI
+        processes={[appPreviewProcess, webProcess, graphiqlProcess]}
+        abortController={new AbortController()}
+        devSessionStatusManager={devSessionStatusManager}
+        shopFqdn="mystore.myshopify.com"
+        onAbort={onAbort}
+      />,
+    )
+    await processesStarted
+    await waitForContent(renderInstance, 'app home message')
+
+    let output = unstyled(renderInstance.lastFrame()!)
+    expect(output).toContain('(f) Filter logs: all')
+    expect(output).toContain('app preview message')
+    expect(output).toContain('react router message')
+    expect(output).toContain('app home message')
+    expect(output).toContain('graphiql message')
+
+    await sendInputAndWait(renderInstance, 10, 'f')
+    output = unstyled(renderInstance.lastFrame()!)
+    expect(output).toContain('(f) Filter logs: app-previ')
+    expect(output).toContain('app preview message')
+    expect(output).not.toContain('react router message')
+    expect(output).not.toContain('app home message')
+    expect(output).not.toContain('graphiql message')
+
+    await sendInputAndWait(renderInstance, 10, 'f', 'f', 'f')
+    output = unstyled(renderInstance.lastFrame()!)
+    expect(output).toContain('(f) Filter logs: app_home')
+    expect(output).not.toContain('app preview message')
+    expect(output).not.toContain('react router message')
+    expect(output).toContain('app home message')
+    expect(output).not.toContain('graphiql message')
+
+    await sendInputAndWait(renderInstance, 10, 'f')
+    output = unstyled(renderInstance.lastFrame()!)
+    expect(output).toContain('(f) Filter logs: all')
+    expect(output).toContain('app preview message')
+    expect(output).toContain('react router message')
+    expect(output).toContain('app home message')
+    expect(output).toContain('graphiql message')
+
+    releaseProcesses()
     renderInstance.unmount()
   })
 

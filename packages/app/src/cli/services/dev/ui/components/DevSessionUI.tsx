@@ -6,7 +6,7 @@ import {buildDevConsoleURL} from '../../../../utilities/app/app-url.js'
 import {OutputProcess} from '@shopify/cli-kit/node/output'
 import {Alert, ConcurrentOutput, Link, LoadingIndicator, TabularData} from '@shopify/cli-kit/node/ui/components'
 import {useAbortSignal} from '@shopify/cli-kit/node/ui/hooks'
-import React, {FunctionComponent, useEffect, useMemo, useState} from 'react'
+import React, {FunctionComponent, useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import {AbortController, AbortSignal} from '@shopify/cli-kit/node/abort'
 import {Box, MouseProvider, Text, useInput, useStdin} from '@shopify/cli-kit/node/ink'
 import {handleCtrlC} from '@shopify/cli-kit/node/ui'
@@ -62,6 +62,30 @@ const DevSessionUI: FunctionComponent<DevSesionUIProps> = ({
   const [error, setError] = useState<string | undefined>(undefined)
   const [status, setStatus] = useState<DevSessionStatus>(devSessionStatusManager.status)
   const [shouldShowPersistentDevInfo, setShouldShowPersistentDevInfo] = useState<boolean>(false)
+  const [availableLogPrefixes, setAvailableLogPrefixes] = useState<string[]>(() => [
+    ...new Set(processes.map(({prefix}) => prefix)),
+  ])
+  const availableLogPrefixesRef = useRef(new Set(availableLogPrefixes))
+  const [selectedLogPrefix, setSelectedLogPrefix] = useState<string | undefined>()
+
+  const addAvailableLogPrefix = useCallback((prefix: string) => {
+    if (availableLogPrefixesRef.current.has(prefix)) return
+
+    availableLogPrefixesRef.current.add(prefix)
+    setAvailableLogPrefixes((currentPrefixes) => [...currentPrefixes, prefix])
+  }, [])
+
+  const filterOutputByPrefix = useCallback(
+    (prefix: string) => selectedLogPrefix === undefined || prefix === selectedLogPrefix,
+    [selectedLogPrefix],
+  )
+
+  const selectNextLogPrefix = () => {
+    setSelectedLogPrefix((currentPrefix) => {
+      const currentPrefixIndex = currentPrefix === undefined ? -1 : availableLogPrefixes.indexOf(currentPrefix)
+      return availableLogPrefixes[currentPrefixIndex + 1]
+    })
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const {isAborted} = useAbortSignal(abortController.signal, async (err: any) => {
@@ -100,6 +124,10 @@ const DevSessionUI: FunctionComponent<DevSesionUIProps> = ({
       devSessionStatusManager.off('dev-session-update', setStatus)
     }
   }, [])
+
+  useEffect(() => {
+    processes.forEach(({prefix}) => addAvailableLogPrefix(prefix))
+  }, [addAvailableLogPrefix, processes])
 
   useInput(
     (input, key) => {
@@ -234,6 +262,13 @@ const DevSessionUI: FunctionComponent<DevSesionUIProps> = ({
         </Box>
       ),
     },
+    // eslint-disable-next-line id-length
+    f: {
+      label: `Filter logs: ${selectedLogPrefix ?? 'all'}`,
+      action: async () => {
+        selectNextLogPrefix()
+      },
+    },
     q: {
       label: 'Quit',
       action: async () => {
@@ -250,6 +285,8 @@ const DevSessionUI: FunctionComponent<DevSesionUIProps> = ({
         abortSignal={abortController.signal}
         keepRunningAfterProcessesResolve={true}
         useAlternativeColorPalette={true}
+        outputFilter={canUseShortcuts ? filterOutputByPrefix : undefined}
+        onOutputPrefix={canUseShortcuts ? addAvailableLogPrefix : undefined}
       />
       {shouldShowPersistentDevInfo && (
         <Box marginTop={1} flexDirection="column">
@@ -295,8 +332,8 @@ const DevSessionUI: FunctionComponent<DevSesionUIProps> = ({
     </>
   )
 
-  return canUseShortcuts && !isAborted ? (
-    <MouseProvider allowTerminalScrolling trackMouseMovement={false}>
+  return canUseShortcuts ? (
+    <MouseProvider allowTerminalScrolling isActive={!isAborted} trackMouseMovement={false}>
       {content}
     </MouseProvider>
   ) : (
